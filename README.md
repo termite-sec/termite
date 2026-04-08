@@ -62,13 +62,6 @@ On first run, termite will prompt you to configure the server endpoint. You can 
 ```bash
 termite configure
 ```
-
-By default, termite points to the hosted server at `api.termite-sec.com`. If you are self-hosting, set your own endpoint:
-
-```bash
-termite configure --server http://your-server:8080
-```
-
 ---
 
 ## Usage
@@ -107,29 +100,6 @@ Scanning: main.py
   Recommendation: Move secrets to environment variables or a secrets manager.
 
   2 issues found.
-```
-
----
-
-## Self-Hosting
-
-Termite's backend requires Ollama with qwen2.5-coder running locally or on a server you control.
-
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull the model
-ollama pull qwen2.5-coder:7b
-
-# Start Ollama
-ollama serve
-```
-
-Then point termite at your server:
-
-```bash
-termite configure --server http://localhost:11434
 ```
 
 ---
