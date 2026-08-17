@@ -12,15 +12,15 @@ case $ARCH in
 esac
 
 case $OS in
-  linux) BINARY="termite-linux-$ARCH" ;;
-  darwin) BINARY="termite-darwin-$ARCH" ;;
+  linux) BINARY="kitin-linux-$ARCH" ;;
+  darwin) BINARY="kitin-darwin-$ARCH" ;;
   *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
-echo "Downloading termite for $OS/$ARCH..."
-curl -sSL "https://github.com/termite-sec/termite/releases/latest/download/$BINARY" -o /tmp/termite
-chmod +x /tmp/termite
-sudo mv /tmp/termite /usr/local/bin/termite
+echo "Downloading kitin for $OS/$ARCH..."
+curl -sSL "https://github.com/kitin-sec/kitin/releases/latest/download/$BINARY" -o /tmp/kitin
+chmod +x /tmp/kitin
+sudo mv /tmp/kitin /usr/local/bin/kitin
 
-echo "termite installed successfully!"
-termite --version
+echo "kitin installed successfully!"
+kitin --version

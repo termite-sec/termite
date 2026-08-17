@@ -1,4 +1,4 @@
-module github.com/termite/termite
+module github.com/kitin/kitin
 
 go 1.24.2
 

@@ -2,18 +2,19 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
-	"time"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/kitin/kitin/internal/db"
+	"github.com/kitin/kitin/internal/regulations"
 )
-
-var db *sql.DB
 
 type ScanRequest struct {
 	Token string   `json:"token"`
@@ -52,8 +53,20 @@ type ScanResponse struct {
 	Status   string    `json:"status"`
 }
 
+var bedrockHTTPClient = &http.Client{Timeout: bedrockTimeout()}
+
 func main() {
-	initDB()
+	loadEnvFiles()
+
+	if err := db.Init(); err != nil {
+		fmt.Println("db error:", err)
+		os.Exit(1)
+	}
+
+	if err := validateBedrockConfig(); err != nil {
+		fmt.Println("bedrock error:", err)
+		os.Exit(1)
+	}
 
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/scan", handleScan)
@@ -62,46 +75,73 @@ func main() {
 	http.HandleFunc("/report", handleReport)
 
 	port := "8080"
-	fmt.Printf("termite server running on port %s\n", port)
+	fmt.Printf("kitin server running on port %s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		fmt.Println("server error:", err)
 		os.Exit(1)
 	}
 }
 
-func initDB() {
-	var err error
-	db, err = sql.Open("sqlite3", "/var/lib/termite/termite.db")
-	if err != nil {
-		fmt.Println("db error:", err)
-		os.Exit(1)
+func bedrockModel() string {
+	if m := os.Getenv("KITIN_BEDROCK_MODEL"); m != "" {
+		return m
 	}
+	return "openai.gpt-oss-120b"
+}
 
-	db.Exec(`
-		CREATE TABLE IF NOT EXISTS schedules (
-			id         TEXT PRIMARY KEY,
-			token      TEXT NOT NULL,
-			path       TEXT NOT NULL,
-			every      TEXT NOT NULL,
-			slack      TEXT,
-			email      TEXT,
-			discord    TEXT,
-			last_run   DATETIME,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-		CREATE TABLE IF NOT EXISTS scans (
-			id          TEXT PRIMARY KEY,
-			token       TEXT NOT NULL,
-			findings    TEXT,
-			status      TEXT,
-			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-	`)
+func validateBedrockConfig() error {
+	if strings.TrimRight(os.Getenv("OPENAI_BASE_URL"), "/") == "" {
+		return fmt.Errorf("OPENAI_BASE_URL not set — export it or add to ~/.kitin/env or .env in the project root")
+	}
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		return fmt.Errorf("OPENAI_API_KEY not set — export it or add to ~/.kitin/env or .env in the project root")
+	}
+	fmt.Printf("bedrock ready: model=%s endpoint=%s/responses\n", bedrockModel(), strings.TrimRight(os.Getenv("OPENAI_BASE_URL"), "/"))
+	return nil
+}
+
+func loadEnvFiles() {
+	if home, err := os.UserHomeDir(); err == nil {
+		loadEnvFile(filepath.Join(home, ".kitin", "env"))
+	}
+	loadEnvFile(".env")
+}
+
+func loadEnvFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		val = strings.Trim(val, `"'`)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, val)
+		}
+	}
+}
+
+func bedrockTimeout() time.Duration {
+	if s := os.Getenv("KITIN_BEDROCK_TIMEOUT_SECONDS"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 300 * time.Second
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintln(w, `{"status":"ok","model":"qwen2.5-coder:7b"}`)
+	fmt.Fprintf(w, `{"status":"ok","model":"%s"}`, bedrockModel())
 }
 
 func handleScan(w http.ResponseWriter, r *http.Request) {
@@ -122,15 +162,15 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt := buildPrompt(req.Files, req.Modes)
-	findings, err := callOllama(prompt)
+	findings, err := callBedrock(prompt)
 	if err != nil {
-		http.Error(w, "ollama error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "llm error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	scanID := fmt.Sprintf("%d", time.Now().UnixNano())
 	findingsJSON, _ := json.Marshal(findings)
-	db.Exec(`INSERT INTO scans (id, token, findings, status) VALUES (?, ?, ?, ?)`,
+	db.DB.Exec(`INSERT INTO scans (id, token, findings, status) VALUES (?, ?, ?, ?)`,
 		scanID, req.Token, string(findingsJSON), "complete")
 
 	w.Header().Set("Content-Type", "application/json")
@@ -159,7 +199,7 @@ func handleSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := fmt.Sprintf("%d", time.Now().UnixNano())
-	db.Exec(`INSERT INTO schedules (id, token, path, every, slack, email, discord) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	db.DB.Exec(`INSERT INTO schedules (id, token, path, every, slack, email, discord) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id, req.Token, req.Path, req.Every, req.Slack, req.Email, req.Discord)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -173,7 +213,7 @@ func handleListSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Query(`SELECT id, path, every, slack, email, discord, created_at FROM schedules WHERE token = ?`, token)
+	rows, err := db.DB.Query(`SELECT id, path, every, slack, email, discord, created_at FROM schedules WHERE token = ?`, token)
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -210,7 +250,7 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 
 	var findings string
 	var createdAt string
-	err := db.QueryRow(`SELECT findings, created_at FROM scans WHERE token = ? ORDER BY created_at DESC LIMIT 1`, token).
+	err := db.DB.QueryRow(`SELECT findings, created_at FROM scans WHERE token = ? ORDER BY created_at DESC LIMIT 1`, token).
 		Scan(&findings, &createdAt)
 	if err != nil {
 		http.Error(w, "no scans found", http.StatusNotFound)
@@ -222,7 +262,8 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildPrompt(files []File, modes []string) string {
-	prompt := `You are a security code scanner. Analyze the code and return a JSON array of security issues.
+	compliance := regulations.FormatForPrompt(modes)
+	prompt := fmt.Sprintf(`You are a security code scanner. Analyze the code and return a JSON array of security issues.
 
 Return ONLY a JSON array. No other text. No markdown. No backticks.
 Start with [ and end with ].
@@ -231,50 +272,104 @@ If no issues found, return [].
 Each issue must have these exact fields:
 {"file":"filename","line":0,"type":"security","law":"law name","severity":"critical|high|medium|low","message":"description of the issue","fix":"how to fix it","fine":"legal consequence"}
 
-Scan for: hardcoded secrets, SQL injection, XSS, GDPR violations, HIPAA violations, CCPA violations, insecure configs, weak crypto, missing encryption.
+Scan for: hardcoded secrets, SQL injection, XSS, insecure configs, weak crypto, missing encryption.
+Also check compliance with these regulations and frameworks: %s.
+Map each finding's "law" field to the specific regulation violated.
 
 Code to scan:
-`
+`, compliance)
 	for _, f := range files {
 		prompt += fmt.Sprintf("\n--- %s ---\n%s\n", f.Name, f.Content)
 	}
 	return prompt
 }
 
-func callOllama(prompt string) ([]Finding, error) {
-	ollamaURL := "http://192.168.122.1:11434/api/generate"
+func callBedrock(prompt string) ([]Finding, error) {
+	baseURL := strings.TrimRight(os.Getenv("OPENAI_BASE_URL"), "/")
+	if baseURL == "" {
+		return nil, fmt.Errorf("OPENAI_BASE_URL not set")
+	}
 
-	body, _ := json.Marshal(map[string]interface{}{
-		"model":  "qwen2.5-coder:7b",
-		"prompt": prompt,
-		"stream": false,
-		"temperature": 0.1,
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("OPENAI_API_KEY not set")
+	}
+
+	model := bedrockModel()
+
+	body, err := json.Marshal(map[string]interface{}{
+		"model": model,
+		"input": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
 	})
-
-	resp, err := http.Post(ollamaURL, "application/json", bytes.NewBuffer(body))
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach ollama: %v", err)
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/responses", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := bedrockHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach Bedrock: %v", err)
 	}
 	defer resp.Body.Close()
 
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("cannot decode ollama response: %v", err)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read Bedrock response: %v", err)
 	}
 
-	response, ok := result["response"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid ollama response")
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Bedrock returned %d: %s", resp.StatusCode, truncate(string(respBody), 500))
 	}
 
-	// Clean markdown fences
+	text := extractOutputText(respBody)
+	return parseFindings(text)
+}
+
+func extractOutputText(respBody []byte) string {
+	var result struct {
+		Output []struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return string(respBody)
+	}
+
+	var parts []string
+	for _, out := range result.Output {
+		for _, item := range out.Content {
+			if item.Type == "output_text" && item.Text != "" {
+				parts = append(parts, item.Text)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return string(respBody)
+	}
+
+	return strings.Join(parts, "")
+}
+
+func parseFindings(response string) ([]Finding, error) {
 	response = strings.TrimSpace(response)
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```")
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	// Extract JSON array
 	if idx := strings.Index(response, "["); idx != -1 {
 		response = response[idx:]
 	}
@@ -283,8 +378,6 @@ func callOllama(prompt string) ([]Finding, error) {
 	}
 
 	var findings []Finding
-	// Add this right after the cleaning code, before json.Unmarshal
-	fmt.Printf("DEBUG RAW RESPONSE: %s\n", response)
 	if err := json.Unmarshal([]byte(response), &findings); err != nil {
 		findings = []Finding{{
 			Type:     "general",
@@ -295,4 +388,11 @@ func callOllama(prompt string) ([]Finding, error) {
 	}
 
 	return findings, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

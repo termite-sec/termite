@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kitin/kitin/internal/regulations"
 )
 
 // ── config types ───────────────────────────────────────────────────────────
@@ -36,75 +38,7 @@ type Notifications struct {
 	Discord        string `json:"discord"`
 	Email          string `json:"email"`
 	MicrosoftTeams string `json:"microsoft_teams"`
-}
-
-// ── regulation registry ────────────────────────────────────────────────────
-
-type Regulation struct {
-	Key      string
-	Label    string
-	Desc     string
-	Fine     string
-	Category []string
-}
-
-var allRegulations = []Regulation{
-	// federal
-	{"hipaa",        "HIPAA",           "Health Insurance Portability and Accountability Act",                    "fines up to $1.9M per year per violation category",              []string{"federal", "health"}},
-	{"coppa",        "COPPA",           "Children's Online Privacy Protection Act",                               "fines up to $51,744 per violation",                              []string{"federal", "children", "data"}},
-	{"can-spam",     "CAN-SPAM",        "Controlling the Assault of Non-Solicited Pornography and Marketing Act", "fines up to $51,744 per email",                                  []string{"federal", "data"}},
-	{"tcpa",         "TCPA",            "Telephone Consumer Protection Act",                                      "fines $500–$1,500 per violation",                                []string{"federal", "data"}},
-	{"vppa",         "VPPA",            "Video Privacy Protection Act",                                           "fines up to $2,500 per violation",                               []string{"federal", "data"}},
-	{"glba",         "GLBA",            "Gramm-Leach-Bliley Act — financial data privacy",                        "fines up to $100,000 per violation",                             []string{"federal", "financial"}},
-	{"eo14117",      "Executive Order 14117", "Preventing Access to Americans' Bulk Sensitive Personal Data",    "civil and criminal penalties",                                   []string{"federal", "data"}},
-	{"nist-800-53",  "NIST 800-53",     "US federal security and privacy controls framework",                    "federal contract loss, audit findings",                          []string{"federal"}},
-	// international
-	{"gdpr",         "GDPR",            "General Data Protection Regulation (EU)",                               "fines up to €20M or 4% of global annual revenue",               []string{"international", "data"}},
-	// california
-	{"ccpa",         "CCPA",            "California Consumer Privacy Act",                                        "fines up to $7,500 per intentional violation",                  []string{"state", "data", "california"}},
-	{"cpra",         "CPRA",            "California Privacy Rights Act (extends CCPA)",                           "fines up to $7,500 per violation, triples for minors",          []string{"state", "data", "california"}},
-	{"caadc",        "CAADC",           "California Age-Appropriate Design Code (SB 362)",                        "fines up to $7,500 per affected child per violation",           []string{"state", "children", "california"}},
-	{"cipa",         "CIPA",            "California Invasion of Privacy Act",                                     "fines up to $5,000 per violation",                              []string{"state", "data", "california"}},
-	{"shine-the-light", "Shine the Light", "California data sharing disclosure law",                             "fines up to $3,000 per violation",                              []string{"state", "data", "california"}},
-	{"caloppa",      "CalOPPA",         "California Online Privacy Protection Act — privacy policy requirement",  "fines up to $2,500 per violation",                              []string{"state", "data", "california"}},
-	{"ca-delete-act","California Delete Act", "SB 362 — data broker deletion requests",                          "fines up to $200/day per consumer per data broker",             []string{"state", "data", "california", "broker"}},
-	{"ca-iot-sb327", "California IoT Security Law (SB 327)", "Security requirements for connected devices",      "injunctive relief, civil penalties",                            []string{"state", "california"}},
-	// health (state)
-	{"mhmd",         "MHMD",            "Washington My Health My Data Act",                                       "fines up to $7,500 per violation, private right of action",     []string{"state", "health"}},
-	{"nv-health",    "Nevada Consumer Health Data Privacy Law", "Nevada health data privacy protections",         "civil penalties up to $15,000 per violation",                  []string{"state", "health"}},
-	// biometric
-	{"bipa",         "BIPA",            "Illinois Biometric Information Privacy Act",                             "fines $1,000–$5,000 per violation, private right of action",    []string{"state", "biometric"}},
-	// new york
-	{"ny-shield",    "New York SHIELD Act", "Stop Hacks and Improve Electronic Data Security Act",               "fines up to $250,000",                                          []string{"state", "data"}},
-	{"nydfs",        "NYDFS",           "NY Dept. of Financial Services Cybersecurity Regulations — 23 NYCRR 500","fines up to $1,000 per violation per day",                    []string{"state", "financial"}},
-	// financial / security
-	{"pci-dss",      "PCI-DSS",         "Payment Card Industry Data Security Standard",                           "fines $5,000–$100,000 per month",                               []string{"financial"}},
-	{"soc2",         "SOC2",            "Service Organization Control 2 — enterprise compliance",                 "loss of enterprise contracts, audit failures",                  []string{"financial"}},
-	{"oh-sb200",     "Ohio SB 200",     "Ohio Cybersecurity Safe Harbor — affirmative defense if compliant",      "safe harbor from tort liability",                               []string{"state", "financial"}},
-	// state privacy laws
-	{"co-privacy",   "Colorado Privacy Act",                     "Consumer data rights and controller obligations",       "fines up to $20,000 per violation",  []string{"state", "data"}},
-	{"ct-privacy",   "Connecticut Data Privacy Act",             "Consumer data rights for CT residents",                 "fines up to $5,000 per violation",   []string{"state", "data"}},
-	{"de-privacy",   "Delaware Personal Data Privacy Act",       "Consumer data privacy rights for DE residents",         "fines up to $10,000 per violation",  []string{"state", "data"}},
-	{"fl-privacy",   "Florida Data Privacy and Security Act",    "SB 262 — consumer data rights for FL residents",        "fines up to $50,000 per violation",  []string{"state", "data"}},
-	{"in-privacy",   "Indiana Consumer Data Protection Act",     "Consumer data privacy rights for IN residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"ia-privacy",   "Iowa Consumer Data Protection Act",        "Consumer data privacy rights for IA residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"ky-privacy",   "Kentucky Consumer Data Protection Act",    "Consumer data privacy rights for KY residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"md-privacy",   "Maryland Online Data Privacy Act",         "Consumer data privacy rights for MD residents",         "fines up to $10,000 per violation",  []string{"state", "data"}},
-	{"mn-privacy",   "Minnesota Consumer Data Privacy Act",      "Consumer data privacy rights for MN residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"mt-privacy",   "Montana Consumer Data Privacy Act",        "Consumer data privacy rights for MT residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"ne-privacy",   "Nebraska Data Privacy Act",                "Consumer data privacy rights for NE residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"nh-privacy",   "New Hampshire Consumer Expectation of Privacy Act", "Consumer data privacy for NH residents",       "fines up to $10,000 per violation",  []string{"state", "data"}},
-	{"nj-privacy",   "New Jersey Personal Data Privacy Act",     "Consumer data privacy rights for NJ residents",         "fines up to $10,000 per violation",  []string{"state", "data"}},
-	{"or-privacy",   "Oregon Consumer Privacy Act",              "Consumer data privacy rights for OR residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"ri-privacy",   "Rhode Island Data Transparency and Privacy Protection Act", "Consumer data privacy for RI residents","fines up to $10,000 per violation", []string{"state", "data"}},
-	{"tn-privacy",   "Tennessee Information Protection Act",     "Consumer data privacy rights for TN residents",         "fines up to $15,000 per violation",  []string{"state", "data"}},
-	{"tx-privacy",   "Texas Data Privacy and Security Act",      "Consumer data privacy rights for TX residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"ut-privacy",   "Utah Consumer Privacy Act",                "Consumer data privacy rights for UT residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	{"va-privacy",   "Virginia Consumer Data Protection Act",    "Consumer data privacy rights for VA residents",         "fines up to $7,500 per violation",   []string{"state", "data"}},
-	// data broker
-	{"vt-broker",    "Vermont Data Broker Registration Law",     "Data brokers must register and meet security standards", "fines up to $10,000 per day",       []string{"state", "data", "broker"}},
-	{"or-broker",    "Oregon Data Broker Law",                   "Data broker registration and consumer opt-out",          "fines up to $1,000 per day",        []string{"state", "data", "broker"}},
-	{"tx-broker",    "Texas Data Broker Law",                    "Data broker registration requirements in Texas",         "fines up to $10,000 per violation", []string{"state", "data", "broker"}},
+	PushURL        string `json:"push_url"`
 }
 
 // ── shortcut groups ────────────────────────────────────────────────────────
@@ -132,7 +66,7 @@ func getRegsByCategory(cats []string) []string {
 	for _, c := range cats { catSet[c] = true }
 	keys := []string{}
 	seen := map[string]bool{}
-	for _, reg := range allRegulations {
+	for _, reg := range regulations.All {
 		for _, c := range reg.Category {
 			if catSet[c] && !seen[reg.Key] {
 				keys = append(keys, reg.Key)
@@ -146,10 +80,29 @@ func getRegsByCategory(cats []string) []string {
 // ── config helpers ─────────────────────────────────────────────────────────
 
 func configPath() string {
-	return filepath.Join(os.Getenv("HOME"), ".termite", "config.json")
+	return filepath.Join(os.Getenv("HOME"), ".kitin", "config.json")
+}
+
+func migrateConfigIfNeeded() {
+	configFile := configPath()
+	if _, err := os.Stat(configFile); err == nil {
+		return
+	}
+	legacyDig := filepath.Join(os.Getenv("HOME"), ".dig", "config.json")
+	if data, err := os.ReadFile(legacyDig); err == nil {
+		os.MkdirAll(filepath.Dir(configFile), 0700)
+		os.WriteFile(configFile, data, 0600)
+		return
+	}
+	legacyTermite := filepath.Join(os.Getenv("HOME"), ".termite", "config.json")
+	if data, err := os.ReadFile(legacyTermite); err == nil {
+		os.MkdirAll(filepath.Dir(configFile), 0700)
+		os.WriteFile(configFile, data, 0600)
+	}
 }
 
 func loadFullConfig() FullConfig {
+	migrateConfigIfNeeded()
 	data, err := os.ReadFile(configPath())
 	if err != nil { return FullConfig{} }
 	var cfg FullConfig
@@ -221,8 +174,7 @@ func selectRegulations(current []string) []string {
 	selected := map[string]bool{}
 	for _, r := range current { selected[r] = true }
 
-	regMap := map[string]Regulation{}
-	for _, r := range allRegulations { regMap[r.Key] = r }
+	regMap := regulations.ByKey()
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -286,6 +238,15 @@ func selectRegulations(current []string) []string {
 
 		count := 0
 		for _, v := range selected { if v { count++ } }
+		if count > 0 {
+			fmt.Println(boldSand.Render("  Currently active:"))
+			for _, reg := range regulations.All {
+				if selected[reg.Key] {
+					fmt.Printf("    %s %s\n", okStyle.Render("[✓]"), rustStyle.Render(reg.Key+" — "+reg.Label))
+				}
+			}
+			fmt.Println()
+		}
 		fmt.Println(soilStyle.Render(fmt.Sprintf("  %d Regulation(s) selected", count)))
 		fmt.Println()
 		fmt.Print(rustStyle.Render("  → ") + sandStyle.Render("Type a key, shortcut, or 'done'") + ": ")
@@ -339,7 +300,7 @@ func selectRegulations(current []string) []string {
 
 done:
 	result := []string{}
-	for _, reg := range allRegulations {
+	for _, reg := range regulations.All {
 		if selected[reg.Key] { result = append(result, reg.Key) }
 	}
 	return result
@@ -347,17 +308,42 @@ done:
 
 // ── configure command ──────────────────────────────────────────────────────
 
+func runRegulations() {
+	cfg := loadFullConfig()
+
+	fmt.Println()
+	fmt.Println(boldSand.Render("  kitin regulations"))
+	fmt.Println(soilStyle.Render("  update which acts apply to your codebase"))
+	if len(cfg.Regulations) > 0 {
+		fmt.Println(soilStyle.Render(fmt.Sprintf("  %d regulation(s) saved — previously selected items show as [✓] below", len(cfg.Regulations))))
+	} else {
+		fmt.Println(soilStyle.Render("  none saved yet — select acts and type done"))
+	}
+	fmt.Println()
+
+	cfg.Regulations = selectRegulations(cfg.Regulations)
+	saveFullConfig(cfg)
+
+	fmt.Println()
+	if len(cfg.Regulations) == 0 {
+		fmt.Println(amberStyle.Render("  ⚠ no regulations selected"))
+	} else {
+		fmt.Println(okStyle.Render(fmt.Sprintf("  ✓ saved %d regulation(s) to ~/.kitin/config.json", len(cfg.Regulations))))
+	}
+	fmt.Println()
+}
+
 func runConfigure() {
 	cfg := loadFullConfig()
 	if cfg.Token == "" { cfg.Token = loadOrCreateToken() }
 
 	fmt.Println()
-	fmt.Println(boldSand.Render("  termite setup wizard"))
+	fmt.Println(boldSand.Render("  kitin setup wizard"))
 	fmt.Println(soilStyle.Render("  configure your legal profile, platform, and agent"))
 
 	printStep(1, "legal profile")
 	fmt.Println(soilStyle.Render("  which regulations apply to your codebase?"))
-	fmt.Println(soilStyle.Render("  termite maps every finding to these laws and calculates fine exposure."))
+	fmt.Println(soilStyle.Render("  kitin maps every finding to these laws and calculates fine exposure."))
 	fmt.Println(soilStyle.Render("  toggle with the key shown on the left, or use shortcuts to bulk-add."))
 
 	cfg.Regulations = selectRegulations(cfg.Regulations)
@@ -370,7 +356,7 @@ func runConfigure() {
 	}
 
 	printStep(2, "Connect your platform")
-	fmt.Println(soilStyle.Render("  Termite needs access to create branches, issues, and PRs."))
+	fmt.Println(soilStyle.Render("  Kitin needs access to create branches, issues, and PRs."))
 	fmt.Println()
 
 	platforms := []string{"GitHub", "GitLab", "Bitbucket", "Azure DevOps", "skip for now"}
@@ -407,8 +393,8 @@ func runConfigure() {
 	}
 
 	printStep(3, "Agent Bounds")
-	fmt.Println(soilStyle.Render("  What should termite do automatically when it finds issues?"))
-	fmt.Println(soilStyle.Render("  Change anytime with: termite agent configure"))
+	fmt.Println(soilStyle.Render("  What should kitin do automatically when it finds issues?"))
+	fmt.Println(soilStyle.Render("  Change anytime with: kitin agent configure"))
 	fmt.Println()
 
 	actions    := []string{
@@ -448,22 +434,23 @@ func runConfigure() {
 	cfg.AgentBounds.AssignAuthor = promptYN("Assign issues to the commit author?", cfg.AgentBounds.AssignAuthor)
 
 	printStep(4, "Notifications")
-	fmt.Println(soilStyle.Render("  Where should termite send alerts?"))
+	fmt.Println(soilStyle.Render("  Where should kitin send alerts?"))
 	fmt.Println()
 	cfg.Notifications.Slack          = prompt("slack webhook url", cfg.Notifications.Slack)
 	cfg.Notifications.Discord        = prompt("discord webhook url", cfg.Notifications.Discord)
 	cfg.Notifications.MicrosoftTeams = prompt("microsoft teams webhook url", cfg.Notifications.MicrosoftTeams)
 	cfg.Notifications.Email          = prompt("email address", cfg.Notifications.Email)
+	cfg.Notifications.PushURL        = prompt("phone push url (http://ip:port/path or ntfy)", cfg.Notifications.PushURL)
 
 	saveFullConfig(cfg)
 
 	fmt.Println()
-	fmt.Println(okStyle.Render("  ✓ Configuration saved to ~/.termite/config.json"))
+	fmt.Println(okStyle.Render("  ✓ Configuration saved to ~/.kitin/config.json"))
 	fmt.Println()
 	fmt.Println(boldSand.Render("  Next steps:"))
-	fmt.Println(soilStyle.Render("    termite init          — add termite.yml to your repo"))
-	fmt.Println(soilStyle.Render("    termite agent start   — start the agentic loop"))
-	fmt.Println(soilStyle.Render("    termite scan .        — run your first scan"))
+	fmt.Println(soilStyle.Render("    kitin init          — add kitin.yml to your repo"))
+	fmt.Println(soilStyle.Render("    kitin agent start   — start the agentic loop"))
+	fmt.Println(soilStyle.Render("    kitin scan .        — run your first scan"))
 	fmt.Println()
 }
 
@@ -480,13 +467,13 @@ func runInit() {
 	medAction  := cfg.AgentBounds.Medium;   if medAction  == "" { medAction  = "warn" }
 	lowAction  := cfg.AgentBounds.Low;      if lowAction  == "" { lowAction  = "ignore" }
 
-	yml := fmt.Sprintf(`# termite.yml — drop this in your repo root
-# docs: https://termite.dev/docs
+	yml := fmt.Sprintf(`# kitin.yml — drop this in your repo root
+# docs: https://kitin.dev/docs
 
 version: 1
 
 # ── regulations ──────────────────────────────────────────────────────────────
-# termite maps every finding to these laws and calculates fine exposure
+# kitin maps every finding to these laws and calculates fine exposure
 regulations:
 %s
 
@@ -549,6 +536,7 @@ notifications:
   discord:         "%s"
   microsoft_teams: "%s"
   email:           "%s"
+  push_url:        "%s"
 `,
 		formatRegulations(regs),
 		critAction, highAction, medAction, lowAction,
@@ -556,11 +544,12 @@ notifications:
 		cfg.Notifications.Discord,
 		cfg.Notifications.MicrosoftTeams,
 		cfg.Notifications.Email,
+		cfg.Notifications.PushURL,
 	)
 
-	ymlPath := "termite.yml"
+	ymlPath := "kitin.yml"
 	if _, err := os.Stat(ymlPath); err == nil {
-		fmt.Println(amberStyle.Render("  termite.yml already exists."))
+		fmt.Println(amberStyle.Render("  kitin.yml already exists."))
 		if !promptYN("overwrite?", false) {
 			fmt.Println(soilStyle.Render("  skipped."))
 			return
@@ -569,42 +558,41 @@ notifications:
 
 	os.WriteFile(ymlPath, []byte(yml), 0644)
 	fmt.Println()
-	fmt.Println(okStyle.Render("  ✓ Created termite.yml"))
-	fmt.Println(soilStyle.Render("  Commit this file to activate termite in CI/CD"))
+	fmt.Println(okStyle.Render("  ✓ Created kitin.yml"))
+	fmt.Println(soilStyle.Render("  Commit this file to activate kitin in CI/CD"))
 	fmt.Println()
 	fmt.Println(boldSand.Render("  CI/CD pipeline snippets:"))
 	fmt.Println()
-	fmt.Println(sandStyle.Render("  GitHub Actions (.github/workflows/termite.yml):"))
+	fmt.Println(sandStyle.Render("  GitHub Actions (.github/workflows/kitin.yml):"))
 	fmt.Println(soilStyle.Render("    on: [push, pull_request]"))
 	fmt.Println(soilStyle.Render("    steps:"))
 	fmt.Println(soilStyle.Render("      - uses: actions/checkout@v4"))
-	fmt.Println(soilStyle.Render("      - run: curl -sSL https://get.termite.dev | sh"))
-	fmt.Println(soilStyle.Render("      - run: termite scan . --ci"))
+	fmt.Println(soilStyle.Render("      - run: curl -sSL https://get.kitin.dev | sh"))
+	fmt.Println(soilStyle.Render("      - run: kitin scan . --ci"))
 	fmt.Println()
 	fmt.Println(sandStyle.Render("  GitLab (.gitlab-ci.yml):"))
-	fmt.Println(soilStyle.Render("    termite:"))
+	fmt.Println(soilStyle.Render("    kitin:"))
 	fmt.Println(soilStyle.Render("      script:"))
-	fmt.Println(soilStyle.Render("        - curl -sSL https://get.termite.dev | sh"))
-	fmt.Println(soilStyle.Render("        - termite scan . --ci"))
+	fmt.Println(soilStyle.Render("        - curl -sSL https://get.kitin.dev | sh"))
+	fmt.Println(soilStyle.Render("        - kitin scan . --ci"))
 	fmt.Println()
 	fmt.Println(sandStyle.Render("  Bitbucket (bitbucket-pipelines.yml):"))
 	fmt.Println(soilStyle.Render("    - step:"))
 	fmt.Println(soilStyle.Render("        script:"))
-	fmt.Println(soilStyle.Render("          - curl -sSL https://get.termite.dev | sh"))
-	fmt.Println(soilStyle.Render("          - termite scan . --ci"))
+	fmt.Println(soilStyle.Render("          - curl -sSL https://get.kitin.dev | sh"))
+	fmt.Println(soilStyle.Render("          - kitin scan . --ci"))
 	fmt.Println()
 	fmt.Println(sandStyle.Render("  Azure DevOps (azure-pipelines.yml):"))
 	fmt.Println(soilStyle.Render("    steps:"))
 	fmt.Println(soilStyle.Render("      - script: |"))
-	fmt.Println(soilStyle.Render("          curl -sSL https://get.termite.dev | sh"))
-	fmt.Println(soilStyle.Render("          termite scan . --ci"))
-	fmt.Println(soilStyle.Render("        displayName: Termite Security Scan"))
+	fmt.Println(soilStyle.Render("          curl -sSL https://get.kitin.dev | sh"))
+	fmt.Println(soilStyle.Render("          kitin scan . --ci"))
+	fmt.Println(soilStyle.Render("        displayName: Kitin Security Scan"))
 	fmt.Println()
 }
 
 func formatRegulations(regs []string) string {
-	regMap := map[string]Regulation{}
-	for _, r := range allRegulations { regMap[r.Key] = r }
+	regMap := regulations.ByKey()
 	lines := ""
 	for _, r := range regs {
 		if reg, ok := regMap[r]; ok {
@@ -621,17 +609,17 @@ func formatRegulations(regs []string) string {
 func runConnect(platform string) {
 	cfg := loadFullConfig()
 	fmt.Println()
-	fmt.Println(boldSand.Render("  Connecting termite to " + platform))
+	fmt.Println(boldSand.Render("  Connecting kitin to " + platform))
 	fmt.Println()
 
 	switch strings.ToLower(platform) {
 	case "github":
 		fmt.Println(soilStyle.Render("  Option 1 — GitHub App (recommended)"))
-		fmt.Println(soilStyle.Render("    • @termite[bot] identity in your repo"))
+		fmt.Println(soilStyle.Render("    • @kitin[bot] identity in your repo"))
 		fmt.Println(soilStyle.Render("    • automatic issue/PR/branch management"))
 		fmt.Println(soilStyle.Render("    • project board integration"))
 		fmt.Println()
-		fmt.Println(amberStyle.Render("    → install: https://github.com/apps/termite-security"))
+		fmt.Println(amberStyle.Render("    → install: https://github.com/apps/kitin-security"))
 		fmt.Println()
 		fmt.Println(soilStyle.Render("  Option 2 — personal access token"))
 		fmt.Println(soilStyle.Render("    github.com → settings → developer settings → fine-grained tokens"))
@@ -673,7 +661,7 @@ func runConnect(platform string) {
 	saveFullConfig(cfg)
 	fmt.Println()
 	fmt.Println(okStyle.Render("  ✓ Connected: " + cfg.RepoOwner + "/" + cfg.RepoName + " on " + cfg.Platform))
-	fmt.Println(soilStyle.Render("  run: termite agent start"))
+	fmt.Println(soilStyle.Render("  run: kitin agent start"))
 	fmt.Println()
 }
 
@@ -682,17 +670,17 @@ func runConnect(platform string) {
 func runAgentStart() {
 	cfg := loadFullConfig()
 	fmt.Println()
-	fmt.Println(boldSand.Render("  Starting termite agent"))
+	fmt.Println(boldSand.Render("  Starting kitin agent"))
 	fmt.Println()
 
 	if cfg.Platform == "" || cfg.Platform == "Skip for now" {
 		fmt.Println(amberStyle.Render("  no platform connected."))
-		fmt.Println(soilStyle.Render("  run: termite connect github"))
+		fmt.Println(soilStyle.Render("  run: kitin connect github"))
 		return
 	}
 	if cfg.PlatformToken == "" {
 		fmt.Println(amberStyle.Render("  No platform token found."))
-		fmt.Println(soilStyle.Render("  run: termite connect " + strings.ToLower(cfg.Platform)))
+		fmt.Println(soilStyle.Render("  run: kitin connect " + strings.ToLower(cfg.Platform)))
 		return
 	}
 
@@ -706,10 +694,10 @@ func runAgentStart() {
 	fmt.Println(soilStyle.Render("    low      → ") + soilStyle.Render(cfg.AgentBounds.Low))
 	fmt.Println()
 
-	pidFile := filepath.Join(os.Getenv("HOME"), ".termite", "agent.pid")
+	pidFile := filepath.Join(os.Getenv("HOME"), ".kitin", "agent.pid")
 	if _, err := os.Stat(pidFile); err == nil {
 		fmt.Println(amberStyle.Render("  Agent already running."))
-		fmt.Println(soilStyle.Render("  Termite agent status / termite agent stop"))
+		fmt.Println(soilStyle.Render("  Kitin agent status / kitin agent stop"))
 		return
 	}
 
@@ -724,13 +712,13 @@ func runAgentStart() {
 	fmt.Println(soilStyle.Render("    • move tickets through your project board"))
 	fmt.Println(soilStyle.Render("    • request reviews from commit authors"))
 	fmt.Println()
-	fmt.Println(soilStyle.Render("  logs: ~/.termite/agent.log"))
-	fmt.Println(soilStyle.Render("  stop: termite agent stop"))
+	fmt.Println(soilStyle.Render("  logs: ~/.kitin/agent.log"))
+	fmt.Println(soilStyle.Render("  stop: kitin agent stop"))
 	fmt.Println()
 }
 
 func runAgentStop() {
-	pidFile := filepath.Join(os.Getenv("HOME"), ".termite", "agent.pid")
+	pidFile := filepath.Join(os.Getenv("HOME"), ".kitin", "agent.pid")
 	if _, err := os.Stat(pidFile); err != nil {
 		fmt.Println(amberStyle.Render("  Agent is not running."))
 		return
@@ -743,15 +731,15 @@ func runAgentStop() {
 
 func runAgentStatus() {
 	cfg     := loadFullConfig()
-	pidFile := filepath.Join(os.Getenv("HOME"), ".termite", "agent.pid")
+	pidFile := filepath.Join(os.Getenv("HOME"), ".kitin", "agent.pid")
 
 	fmt.Println()
-	fmt.Println(boldSand.Render("  Termite agent status"))
+	fmt.Println(boldSand.Render("  Kitin agent status"))
 	fmt.Println()
 
 	if _, err := os.Stat(pidFile); err != nil {
 		fmt.Println(soilStyle.Render("  status: ") + amberStyle.Render("stopped"))
-		fmt.Println(soilStyle.Render("  run: termite agent start"))
+		fmt.Println(soilStyle.Render("  run: kitin agent start"))
 	} else {
 		pidData, _ := os.ReadFile(pidFile)
 		fmt.Println(soilStyle.Render("  status: ") + okStyle.Render("running") + soilStyle.Render(" (pid "+string(pidData)+")"))
@@ -768,7 +756,7 @@ func runAgentStatus() {
 	fmt.Println(soilStyle.Render("    medium   → ") + sandStyle.Render(cfg.AgentBounds.Medium))
 	fmt.Println(soilStyle.Render("    low      → ") + soilStyle.Render(cfg.AgentBounds.Low))
 	fmt.Println()
-	fmt.Println(soilStyle.Render("  Termite agent configure — change bounds"))
+	fmt.Println(soilStyle.Render("  Kitin agent configure — change bounds"))
 	fmt.Println()
 }
 
@@ -776,7 +764,7 @@ func runAgentConfigure() {
 	cfg := loadFullConfig()
 	fmt.Println()
 	fmt.Println(boldSand.Render("  Configure agent bounds"))
-	fmt.Println(soilStyle.Render("  Set what termite does autonomously for each severity level"))
+	fmt.Println(soilStyle.Render("  Set what kitin does autonomously for each severity level"))
 	fmt.Println()
 
 	actions    := []string{
@@ -817,6 +805,6 @@ func runAgentConfigure() {
 	saveFullConfig(cfg)
 	fmt.Println()
 	fmt.Println(okStyle.Render("  ✓ Agent bounds updated"))
-	fmt.Println(soilStyle.Render("  Termite agent stop && termite agent start — to apply"))
+	fmt.Println(soilStyle.Render("  Kitin agent stop && kitin agent start — to apply"))
 	fmt.Println()
 }
